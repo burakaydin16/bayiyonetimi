@@ -72,8 +72,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 var app = builder.Build();
 
-// 5. Pipeline
-// Enable Swagger in ALL environments
+// 5. Pipeline - MUST BE FIRST for proxy awareness
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
+// Enable Swagger
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -81,14 +86,9 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger"; 
 });
 
-// Root redirect to Swagger
+// Connectivity Test & Redirect
+app.MapGet("/test", () => "Backend is reached!");
 app.MapGet("/", () => Results.Redirect("/swagger"));
-
-// Enable Forwarded Headers (Essential for proxies like Dokploy/Traefik)
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
-});
 
 // REMOVED app.UseHttpsRedirection()
 // app.UseHttpsRedirection();
