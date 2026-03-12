@@ -70,11 +70,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 var app = builder.Build();
 
 // 5. Pipeline
-if (app.Environment.IsDevelopment())
+// Enable Swagger in ALL environments for access via IP
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "MultiTenant API V1");
+    c.RoutePrefix = "swagger"; // Access via /swagger
+});
 
 if (!app.Environment.IsDevelopment())
 {
