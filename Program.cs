@@ -72,26 +72,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 var app = builder.Build();
 
-// 5. Pipeline - MUST BE FIRST for proxy awareness
+// 5. Pipeline
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 });
 
-// Enable Swagger
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "V1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "MultiTenant API V1");
     c.RoutePrefix = "swagger"; 
 });
 
-// Connectivity Test & Redirect
-app.MapGet("/test", () => "Backend is reached!");
+// Root redirect to Swagger
 app.MapGet("/", () => Results.Redirect("/swagger"));
-
-// REMOVED app.UseHttpsRedirection()
-// app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
 
