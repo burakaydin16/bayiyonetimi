@@ -70,18 +70,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 var app = builder.Build();
 
 // 5. Pipeline
-// Enable Swagger in ALL environments for access via IP
+// Enable Swagger in ALL environments
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "MultiTenant API V1");
-    c.RoutePrefix = "swagger"; // Access via /swagger
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "V1");
+    c.RoutePrefix = "swagger"; 
 });
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
+// REMOVED app.UseHttpsRedirection() as it often causes issues in Docker without SSL
+// app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
 
