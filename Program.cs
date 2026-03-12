@@ -81,7 +81,16 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger"; 
 });
 
-// REMOVED app.UseHttpsRedirection() as it often causes issues in Docker without SSL
+// Root redirect to Swagger
+app.MapGet("/", () => Results.Redirect("/swagger"));
+
+// Enable Forwarded Headers (Essential for proxies like Dokploy/Traefik)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
+// REMOVED app.UseHttpsRedirection()
 // app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
