@@ -9,6 +9,9 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Hardcode the port to 80
+builder.WebHost.UseUrls("http://*:80");
+
 
 // 1. Add Services  - use snake_case JSON so that frontend snake_case fields (deposit_price, linked_deposit_id) match directly
 builder.Services.AddControllers()
