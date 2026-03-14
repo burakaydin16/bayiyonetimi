@@ -5,6 +5,7 @@ using MultiTenantSaaS.Data;
 using MultiTenantSaaS.Entities;
 using MultiTenantSaaS.Services;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using System.Text;
 
@@ -12,6 +13,7 @@ namespace MultiTenantSaaS.Controllers;
 
 public record LoginDto(string TenantName, string Email, string Password);
 public record RegisterTenantDto(string Name, string Email, string Password);
+public record ChangePasswordDto(string OldPassword, string NewPassword);
 
 [ApiController]
 [Route("api/[controller]")]
@@ -37,13 +39,15 @@ public class AuthController : ControllerBase
     {
         _logger.LogInformation("Starting RegisterTenant for {Email}", dto.Email);
 
+        var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+
         // 1. Create Tenant in Master DB
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),
             Name = dto.Name,
             Email = dto.Email,
-            PasswordHash = dto.Password,
+            PasswordHash = hashedPassword,
             SchemaName = $"tenant_{Guid.NewGuid().ToString("N")}"
         };
 
@@ -107,7 +111,7 @@ public class AuthController : ControllerBase
         {
             Id = Guid.NewGuid(),
             Email = dto.Email,
-            PasswordHash = dto.Password,
+            PasswordHash = hashedPassword,
             Role = "Admin"
         };
 
@@ -151,7 +155,7 @@ public class AuthController : ControllerBase
 
         // 3. Find User in Tenant Schema
         var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
-        if (user == null || user.PasswordHash != dto.Password) return Unauthorized("Invalid credentials");
+        if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash)) return Unauthorized("Invalid credentials");
 
         // 4. Generate JWT
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -172,5 +176,37 @@ public class AuthController : ControllerBase
         var tokenString = tokenHandler.WriteToken(token);
 
         return Ok(new { Token = tokenString });
+    }
+
+    [Authorize]
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(ChangePasswordDto dto)
+    {
+        // 1. Get logged in user's ID from JWT Claims
+        var userIdString = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId))
+        {
+            return Unauthorized("Invalid user token");
+        }
+
+        // 2. Find User in DB
+        var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+        {
+            return NotFound("User not found");
+        }
+
+        // 3. Verify Old Password
+        if (!BCrypt.Net.BCrypt.Verify(dto.OldPassword, user.PasswordHash))
+        {
+            return BadRequest(new { Message = "Incorrect old password." });
+        }
+
+        // 4. Update with New Password (Hashed)
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        
+        await _appContext.SaveChangesAsync();
+
+        return Ok(new { Message = "Password changed successfully." });
     }
 }
