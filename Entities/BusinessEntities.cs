@@ -10,7 +10,8 @@ public class User
     public Guid Id { get; set; }
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
-    public string Role { get; set; } = "User";
+    public string Role { get; set; } = "User"; // "Admin", "User", etc.
+    public string Permissions { get; set; } = string.Empty; // e.g., "products_read,products_write"
 }
 
 public class Product

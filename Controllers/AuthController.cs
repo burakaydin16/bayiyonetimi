@@ -11,8 +11,9 @@ using System.Text;
 
 namespace MultiTenantSaaS.Controllers;
 
-public record LoginDto(string TenantName, string Email, string Password);
-public record RegisterTenantDto(string Name, string Email, string Password);
+public record LoginDto(string TenantRef, string Email, string Password);
+public record SuperAdminLoginDto(string Username, string Password);
+public record RegisterTenantDto(string Name, string Username, string Email, string Password);
 public record ChangePasswordDto(string OldPassword, string NewPassword);
 
 [ApiController]
@@ -39,107 +40,60 @@ public class AuthController : ControllerBase
     {
         _logger.LogInformation("Starting RegisterTenant for {Email}", dto.Email);
 
+        // Basic email validation
+        if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(dto.Email))
+        {
+            return BadRequest(new { Message = "Lütfen geçerli bir e-posta adresi giriniz." });
+        }
+
+        // Check if email already exists
+        var existingTenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.Email == dto.Email);
+        if (existingTenant != null)
+        {
+            return BadRequest(new { Message = "Bu e-posta adresi ile zaten kayıtlı bir firma var." });
+        }
+
         var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
-        // 1. Create Tenant in Master DB
+        // Generate a random Reference Code
+        var refCode = "REF-" + new Random().Next(100000, 999999).ToString();
+
+        // 1. Create Tenant in Master DB (Pending Approval)
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),
             Name = dto.Name,
             Email = dto.Email,
             PasswordHash = hashedPassword,
-            SchemaName = $"tenant_{Guid.NewGuid().ToString("N")}"
+            SchemaName = $"tenant_{Guid.NewGuid().ToString("N")}",
+            ReferenceCode = refCode,
+            IsApproved = false // MUST be approved by Super Admin
         };
 
         try
         {
-            _logger.LogInformation("Step 1: Saving Tenant to Master DB...");
+            _logger.LogInformation("Saving Tenant to Master DB (Pending Approval)...");
             _masterContext.Tenants.Add(tenant);
             await _masterContext.SaveChangesAsync();
-            _logger.LogInformation("Step 1: Success.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Step 1 Failed");
-            var realError = ex;
-            while (realError.InnerException != null) realError = realError.InnerException;
-            return BadRequest(new { Step = "MasterSave", Error = realError.Message });
+            _logger.LogError(ex, "Failed to register tenant");
+            return BadRequest(new { Error = "Kayıt işlemi sırasında bir hata oluştu." });
         }
 
-        // 2. Create Schema and Tables
-        var connString = _configuration.GetConnectionString("DefaultConnection");
-        _logger.LogInformation("Step 2: Opening manual connection for Schema creation...");
-
-        using (var conn = new Npgsql.NpgsqlConnection(connString))
-        {
-            await conn.OpenAsync();
-            try
-            {
-                using (var cmd = conn.CreateCommand())
-                {
-                    _logger.LogInformation("Step 2.1: Creating Schema {Schema}...", tenant.SchemaName);
-                    cmd.CommandText = $"CREATE SCHEMA \"{tenant.SchemaName}\"";
-                    await cmd.ExecuteNonQueryAsync();
-
-                    _logger.LogInformation("Step 2.2: Setting search_path...");
-                    cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\"";
-                    await cmd.ExecuteNonQueryAsync();
-
-                    _logger.LogInformation("Step 2.3: Generating and executing Table Scripts...");
-                    var sqlScript = _appContext.Database.GenerateCreateScript();
-                    cmd.CommandText = sqlScript;
-                    await cmd.ExecuteNonQueryAsync();
-                    _logger.LogInformation("Step 2: Success.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Step 2 Failed");
-                return BadRequest(new { Step = "SchemaOrTableCreation", Error = ex.Message });
-            }
-            finally
-            {
-                await conn.CloseAsync();
-            }
-        }
-
-        // 3. Create Admin User
-        _logger.LogInformation("Step 3: Creating Admin User in new schema...");
-        _tenantService.CurrentTenant = tenant;
-
-        var adminUser = new User
-        {
-            Id = Guid.NewGuid(),
-            Email = dto.Email,
-            PasswordHash = hashedPassword,
-            Role = "Admin"
-        };
-
-        try
-        {
-            _appContext.Users.Add(adminUser);
-            _logger.LogInformation("Step 3.1: Calling SaveChangesAsync for Admin User...");
-            await _appContext.SaveChangesAsync();
-            _logger.LogInformation("Step 3: Success.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Step 3 Failed");
-            var realError = ex;
-            while (realError.InnerException != null) realError = realError.InnerException;
-            return BadRequest(new { Step = "AdminUserCreation", Error = realError.Message });
-        }
-
-        _logger.LogInformation("RegisterTenant completed successfully for {Email}", dto.Email);
-        return Ok(new { tenant.Id, tenant.SchemaName, Message = "Registration successful" });
+        _logger.LogInformation("RegisterTenant pending approval for {Email}", dto.Email);
+        return Ok(new { Message = "Kayıt başarılı. Sistem yöneticisinin onayından sonra giriş yapabilirsiniz.", ReferenceCode = refCode });
     }
 
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginDto dto)
     {
-        // 1. Find Tenant
-        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.Name == dto.TenantName);
-        if (tenant == null) return Unauthorized("Tenant not found");
+        // 1. Find Tenant by Reference Code
+        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.ReferenceCode == dto.TenantRef);
+        if (tenant == null) return Unauthorized("Firma bulunamadı. Lütfen geçerli bir Firma ID (Referans) giriniz.");
+
+        if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
 
         // 2. Switch Context to Tenant Schema (Manual for Login check)
         // We can't use the Interceptor here because we don't have a token yet!
@@ -190,6 +144,52 @@ public class AuthController : ControllerBase
                 new Claim(ClaimTypes.Role, user.Role)
             }),
             Expires = DateTime.UtcNow.AddDays(7),
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+        };
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        var tokenString = tokenHandler.WriteToken(token);
+
+        return Ok(new { Token = tokenString, User = new { user.Id, user.Email, user.Role, user.Permissions } });
+    }
+
+    [HttpPost("super-admin-login")]
+    public async Task<IActionResult> SuperAdminLogin(SuperAdminLoginDto dto)
+    {
+        var admin = await _masterContext.SuperAdmins.FirstOrDefaultAsync(a => a.Username == dto.Username || a.Email == dto.Username);
+        
+        // Setup initial default super admin if none exists 
+        if (admin == null && dto.Username == "superadmin" && dto.Password == "nisan2023!")
+        {
+            admin = new SuperAdmin {
+                Id = Guid.NewGuid(),
+                Username = "superadmin",
+                Email = "admin@nisanaydin.com.tr",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("nisan2023!")
+            };
+            _masterContext.SuperAdmins.Add(admin);
+            await _masterContext.SaveChangesAsync();
+        }
+        else if (admin == null)
+        {
+            return Unauthorized("Geçersiz süper admin bilgileri.");
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(dto.Password, admin.PasswordHash))
+        {
+            return Unauthorized("Geçersiz süper admin bilgileri.");
+        }
+
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.ASCII.GetBytes(_configuration["Jwt:Key"] ?? "super_secret_key_1234567890123456");
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString()),
+                new Claim(ClaimTypes.Email, admin.Email),
+                new Claim(ClaimTypes.Role, "SuperAdmin")
+            }),
+            Expires = DateTime.UtcNow.AddDays(1),
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
         var token = tokenHandler.CreateToken(tokenDescriptor);

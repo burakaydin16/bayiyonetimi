@@ -22,7 +22,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<User>().Property(u => u.Email).HasColumnName("email");
         modelBuilder.Entity<User>().Property(u => u.PasswordHash).HasColumnName("password_hash");
         modelBuilder.Entity<User>().Property(u => u.Role).HasColumnName("role");
-        
+        modelBuilder.Entity<User>().Property(u => u.Permissions).HasColumnName("permissions");
         modelBuilder.Entity<Product>().ToTable("products");
         modelBuilder.Entity<Product>().Property(p => p.Id).HasColumnName("id");
         modelBuilder.Entity<Product>().Property(p => p.Name).HasColumnName("name");

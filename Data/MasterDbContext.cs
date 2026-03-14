@@ -8,6 +8,7 @@ public class MasterDbContext : DbContext
     public MasterDbContext(DbContextOptions<MasterDbContext> options) : base(options) { }
 
     public DbSet<Tenant> Tenants { get; set; }
+    public DbSet<SuperAdmin> SuperAdmins { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -17,5 +18,13 @@ public class MasterDbContext : DbContext
         modelBuilder.Entity<Tenant>().Property(t => t.Email).HasColumnName("email");
         modelBuilder.Entity<Tenant>().Property(t => t.PasswordHash).HasColumnName("password_hash");
         modelBuilder.Entity<Tenant>().Property(t => t.SchemaName).HasColumnName("schema_name");
+        modelBuilder.Entity<Tenant>().Property(t => t.ReferenceCode).HasColumnName("reference_code");
+        modelBuilder.Entity<Tenant>().Property(t => t.IsApproved).HasColumnName("is_approved");
+
+        modelBuilder.Entity<SuperAdmin>().ToTable("super_admins", "public");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.Id).HasColumnName("id");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.Username).HasColumnName("username");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.Email).HasColumnName("email");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.PasswordHash).HasColumnName("password_hash");
     }
 }

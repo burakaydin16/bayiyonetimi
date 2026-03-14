@@ -13,6 +13,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://*:80");
 
 
+// Configure lowercase URLs for consistency with frontend
+builder.Services.AddRouting(options => options.LowercaseUrls = true);
+
 // 1. Add Services  - use snake_case JSON so that frontend snake_case fields (deposit_price, linked_deposit_id) match directly
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
