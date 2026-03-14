@@ -155,7 +155,27 @@ public class AuthController : ControllerBase
 
         // 3. Find User in Tenant Schema
         var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
-        if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash)) return Unauthorized("Invalid credentials");
+        if (user == null) return Unauthorized("Invalid credentials");
+
+        bool isPasswordValid = false;
+        try 
+        {
+            isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
+        }
+        catch 
+        {
+            // Fallback for old unhashed passwords
+            isPasswordValid = (user.PasswordHash == dto.Password);
+            
+            // Auto-migrate to hash here if it was valid? Optional, but good practice.
+            if (isPasswordValid)
+            {
+                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+                await _appContext.SaveChangesAsync();
+            }
+        }
+
+        if (!isPasswordValid) return Unauthorized("Invalid credentials");
 
         // 4. Generate JWT
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -182,6 +202,11 @@ public class AuthController : ControllerBase
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword(ChangePasswordDto dto)
     {
+        if (string.IsNullOrEmpty(dto.OldPassword) || string.IsNullOrEmpty(dto.NewPassword))
+        {
+            return BadRequest(new { Message = "Old and new passwords are required." });
+        }
+
         // 1. Get logged in user's ID from JWT Claims
         var userIdString = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId))
@@ -196,8 +221,19 @@ public class AuthController : ControllerBase
             return NotFound("User not found");
         }
 
-        // 3. Verify Old Password
-        if (!BCrypt.Net.BCrypt.Verify(dto.OldPassword, user.PasswordHash))
+        // 3. Verify Old Password safely
+        bool isOldPasswordValid = false;
+        try 
+        {
+            isOldPasswordValid = BCrypt.Net.BCrypt.Verify(dto.OldPassword, user.PasswordHash);
+        } 
+        catch 
+        {
+            // If the database has an old plaintext password, BCrypt throws an exception
+            isOldPasswordValid = (user.PasswordHash == dto.OldPassword);
+        }
+
+        if (!isOldPasswordValid)
         {
             return BadRequest(new { Message = "Incorrect old password." });
         }
