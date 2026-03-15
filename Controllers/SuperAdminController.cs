@@ -39,64 +39,75 @@ public class SuperAdminController : ControllerBase
     public async Task<IActionResult> ApproveTenant(Guid tenantId)
     {
         var tenant = await _masterContext.Tenants.FindAsync(tenantId);
-        if (tenant == null) return NotFound("Tenant not found");
-        if (tenant.IsApproved) return BadRequest("Tenant is already approved");
+        if (tenant == null) return NotFound("Firma bulunamadı.");
+        if (tenant.IsApproved) return BadRequest("Bu firma zaten onaylanmış.");
 
         try
         {
-            _logger.LogInformation("Approving tenant {TenantId}. Creating Schema and Tables for {Schema}...", tenantId, tenant.SchemaName);
+            _logger.LogInformation("Firma onaylanıyor. Şema hazırlanıyor: {Schema}...", tenant.SchemaName);
 
-            // 1. Create Schema manually (idempotent)
             var connString = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new Npgsql.NpgsqlConnection(connString))
             {
                 await conn.OpenAsync();
-                using (var cmd = conn.CreateCommand())
+                using (var transaction = await conn.BeginTransactionAsync())
                 {
-                    cmd.CommandText = $"CREATE SCHEMA IF NOT EXISTS \"{tenant.SchemaName}\"";
-                    await cmd.ExecuteNonQueryAsync();
+                    try
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = transaction;
+
+                            // 1. Varsa eski (hatalı/yarım kalmış) şemayı temizle ve yenisini oluştur
+                            _logger.LogInformation("Creating clean schema...");
+                            cmd.CommandText = $"DROP SCHEMA IF EXISTS \"{tenant.SchemaName}\" CASCADE; CREATE SCHEMA \"{tenant.SchemaName}\";";
+                            await cmd.ExecuteNonQueryAsync();
+
+                            // 2. search_path'i bu şemaya ayarla
+                            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\"";
+                            await cmd.ExecuteNonQueryAsync();
+
+                            // 3. Tabloları oluştur (GenerateCreateScript kullanarak)
+                            _logger.LogInformation("Creating tables from script...");
+                            var sqlScript = _appContext.Database.GenerateCreateScript();
+                            cmd.CommandText = sqlScript;
+                            await cmd.ExecuteNonQueryAsync();
+
+                            // 4. Admin kullanıcısını ekle (Raw SQL ile)
+                            _logger.LogInformation("Inserting admin user...");
+                            cmd.CommandText = @"INSERT INTO users (id, email, password_hash, role, permissions) 
+                                               VALUES (@id, @email, @pw, @role, @perm)";
+                            
+                            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+                            cmd.Parameters.AddWithValue("email", tenant.Email);
+                            cmd.Parameters.AddWithValue("pw", tenant.PasswordHash);
+                            cmd.Parameters.AddWithValue("role", "Admin");
+                            cmd.Parameters.AddWithValue("perm", "*");
+                            
+                            await cmd.ExecuteNonQueryAsync();
+                        }
+                        await transaction.CommitAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        _logger.LogError(ex, "Veritabanı hazırlama hatası");
+                        return BadRequest(new { Step = "DatabaseInit", Error = ex.Message });
+                    }
                 }
             }
 
-            // 2. Run Migrations for the new schema
-            // CurrentTenant property triggers the TenantSchemaInterceptor to set search_path
-            _tenantService.CurrentTenant = tenant;
-            
-            _logger.LogInformation("Running migrations for schema {Schema}...", tenant.SchemaName);
-            await _appContext.Database.MigrateAsync();
-
-            _logger.LogInformation("Schema and Tables initialized for {Schema}", tenant.SchemaName);
-
-            // 3. Create Admin User (idempotent check)
-            var adminEmail = tenant.Email;
-            var adminUser = await _appContext.Users.FirstOrDefaultAsync(u => u.Email == adminEmail);
-            
-            if (adminUser == null)
-            {
-                _logger.LogInformation("Creating Admin User for {Schema}...", tenant.SchemaName);
-                adminUser = new User
-                {
-                    Id = Guid.NewGuid(),
-                    Email = adminEmail,
-                    PasswordHash = tenant.PasswordHash, // Use hashed password from registration
-                    Role = "Admin",
-                    Permissions = "*"
-                };
-                _appContext.Users.Add(adminUser);
-                await _appContext.SaveChangesAsync();
-            }
-
-            // 4. Mark as approved in Master DB
+            // 5. Master DB'de onayla
             tenant.IsApproved = true;
             await _masterContext.SaveChangesAsync();
 
-            _logger.LogInformation("ApproveTenant Success for {TenantId}", tenantId);
-            return Ok(new { Message = "Firma başarıyla onaylandı ve sistem hazırlandı!" });
+            _logger.LogInformation("Firma '{Name}' başarıyla hazırlandı.", tenant.Name);
+            return Ok(new { Message = "Firma başarıyla onaylandı ve veritabanı hazırlandı!" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ApproveTenant failed for {TenantId}", tenantId);
-            return BadRequest(new { Error = ex.Message, Step = "Initialization" });
+            _logger.LogError(ex, "Genel onaylama hatası");
+            return BadRequest(new { Step = "ApproveProcess", Error = ex.Message });
         }
     }
 
