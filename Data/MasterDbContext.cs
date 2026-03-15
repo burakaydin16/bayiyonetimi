@@ -21,6 +21,7 @@ public class MasterDbContext : DbContext
         modelBuilder.Entity<Tenant>().Property(t => t.SchemaName).HasColumnName("schema_name");
         modelBuilder.Entity<Tenant>().Property(t => t.ReferenceCode).HasColumnName("reference_code");
         modelBuilder.Entity<Tenant>().Property(t => t.IsApproved).HasColumnName("is_approved");
+        modelBuilder.Entity<Tenant>().Property(t => t.LogoUrl).HasColumnName("logo_url");
 
         modelBuilder.Entity<User>().ToTable("users", "public");
         modelBuilder.Entity<User>().Property(u => u.Id).HasColumnName("id");
