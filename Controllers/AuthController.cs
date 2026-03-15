@@ -108,19 +108,11 @@ public class AuthController : ControllerBase
         if (tenant == null) return Unauthorized("Firma bulunamadı. Lütfen geçerli bir Firma ID (Referans) giriniz.");
 
         if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
-
-        // 2. Switch Context to Tenant Schema (Manual for Login check)
-        // We can't use the Interceptor here because we don't have a token yet!
-        // So we manually set the search path on the connection.
-        var connection = _appContext.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
-
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\"";
-            await cmd.ExecuteNonQueryAsync();
-        }
-
+        
+        // Use our TenantService to set the context for the current request
+        // This ensures the Interceptor will use the correct schema for all EF queries
+        _tenantService.CurrentTenant = tenant;
+        
         // 3. Find User in Tenant Schema
         var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
         if (user == null) return Unauthorized("Invalid credentials");
