@@ -131,28 +131,30 @@ public class SuperAdminController : ControllerBase
         var owner = await _masterContext.Users.FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Role == "Admin");
 
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-        var key = System.Text.Encoding.ASCII.GetBytes(_configuration["Jwt:Key"] ?? "super_secret_key_1234567890123456");
+        var key = System.Text.Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "super_secret_key_1234567890123456");
         var tokenDescriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, owner?.Id.ToString() ?? Guid.Empty.ToString()),
-                new Claim(ClaimTypes.Email, owner?.Email ?? $"superadmin-as-{tenant.ReferenceCode}"),
+                new Claim(System.Security.Claims.ClaimTypes.NameIdentifier, owner?.Id.ToString() ?? Guid.Empty.ToString()),
+                new Claim(System.Security.Claims.ClaimTypes.Email, owner?.Email ?? $"superadmin-as-{tenant.ReferenceCode}"),
                 new Claim("tenantId", tenant.Id.ToString()),
-                new Claim(ClaimTypes.Role, "Admin")
+                new Claim(System.Security.Claims.ClaimTypes.Role, "Admin")
             }),
             Expires = DateTime.UtcNow.AddHours(2),
-            SigningCredentials = new Microsoft.IdentityModel.Tokens.SigningCredentials(new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(key), Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256Signature)
+            SigningCredentials = new Microsoft.IdentityModel.Tokens.SigningCredentials(
+                new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(key), 
+                Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256Signature)
         };
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var tokenString = tokenHandler.WriteToken(token);
 
         return Ok(new { 
-            Token = tokenString, 
-            User = new { owner?.Id, owner?.Email, Role = "Admin", Permissions = "*" },
-            TenantName = tenant.Name,
-            TenantRef = tenant.ReferenceCode,
-            LogoUrl = tenant.LogoUrl
+            token = tokenString, 
+            user = new { id = owner?.Id, email = owner?.Email, role = "Admin", permissions = "*" },
+            tenant_name = tenant.Name,
+            tenant_ref = tenant.ReferenceCode,
+            logo_url = tenant.LogoUrl
         });
     }
 
