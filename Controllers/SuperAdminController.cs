@@ -9,7 +9,7 @@ using System.Security.Claims;
 namespace MultiTenantSaaS.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/super-admin")]
 [Authorize(Roles = "SuperAdmin")]
 public class SuperAdminController : ControllerBase
 {

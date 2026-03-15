@@ -7,7 +7,7 @@ using MultiTenantSaaS.Entities;
 namespace MultiTenantSaaS.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/products")]
 [Authorize]
 public class ProductsController : ControllerBase
 {

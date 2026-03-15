@@ -17,7 +17,7 @@ public record RegisterTenantDto(string Name, string Username, string Email, stri
 public record ChangePasswordDto(string OldPassword, string NewPassword);
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/auth")]
 public class AuthController : ControllerBase
 {
     private readonly MasterDbContext _masterContext;

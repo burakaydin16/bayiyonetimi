@@ -7,7 +7,7 @@ using MultiTenantSaaS.Entities;
 namespace MultiTenantSaaS.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/customers")]
 [Authorize]
 public class CustomersController : ControllerBase
 {

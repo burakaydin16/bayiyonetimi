@@ -12,7 +12,7 @@ public record CreateUserDto(string Email, string Password, string Role, string P
 public record UpdateUserPermissionsDto(string Permissions);
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/users")]
 [Authorize(Roles = "Admin,SuperAdmin")] // Only Admins (or Super Admin via login-as) can manage users
 public class UsersController : ControllerBase
 {
