@@ -109,12 +109,21 @@ public class AuthController : ControllerBase
 
         if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
         
-        // Use our TenantService to set the context for the current request
-        // This ensures the Interceptor will use the correct schema for all EF queries
+        // Explicitly set the schema context for this connection
+        var connection = _appContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\"";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Also set for interceptor usage in any subsequent EF calls (like SaveChanges)
         _tenantService.CurrentTenant = tenant;
-        
+
         // 3. Find User in Tenant Schema
-        var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
+        _logger.LogInformation("Attempting login for user {Email} in schema {Schema}", dto.Email, tenant.SchemaName);
+        var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
         if (user == null) return Unauthorized("Invalid credentials");
 
         bool isPasswordValid = false;
