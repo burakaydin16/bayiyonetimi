@@ -157,4 +157,59 @@ public class SuperAdminController : ControllerBase
 
         return Ok(new { Token = tokenString });
     }
+
+    [HttpPost("reset-tenant-password/{tenantId}")]
+    public async Task<IActionResult> ResetTenantPassword(Guid tenantId, [FromBody] ResetTenantPasswordDto dto)
+    {
+        var tenant = await _masterContext.Tenants.FindAsync(tenantId);
+        if (tenant == null) return NotFound("Firma bulunamadı.");
+
+        if (string.IsNullOrWhiteSpace(dto.NewPassword)) 
+            return BadRequest("Yeni şifre boş olamaz.");
+
+        var newHashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+
+        try
+        {
+            // 1. Update Master DB
+            tenant.PasswordHash = newHashedPassword;
+            await _masterContext.SaveChangesAsync();
+
+            // 2. Update the User in Tenant Schema (if schema exists)
+            var connString = _configuration.GetConnectionString("DefaultConnection");
+            using (var conn = new Npgsql.NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = $@"
+                        DO $$
+                        BEGIN
+                            IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = '{tenant.SchemaName}') THEN
+                                UPDATE ""{tenant.SchemaName}"".users 
+                                SET password_hash = @pw 
+                                WHERE email = @email;
+                            END IF;
+                        END $$;";
+                    
+                    cmd.Parameters.AddWithValue("pw", newHashedPassword);
+                    cmd.Parameters.AddWithValue("email", tenant.Email);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            _logger.LogInformation("Firma '{Name}' şifresi SuperAdmin tarafından sıfırlandı.", tenant.Name);
+            return Ok(new { Message = "Firmanın şifresi başarıyla güncellendi!" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Şifre resetleme hatası");
+            return BadRequest(new { Error = ex.Message });
+        }
+    }
+}
+
+public class ResetTenantPasswordDto
+{
+    public string NewPassword { get; set; } = string.Empty;
 }

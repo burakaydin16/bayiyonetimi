@@ -163,7 +163,12 @@ public class AuthController : ControllerBase
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var tokenString = tokenHandler.WriteToken(token);
 
-        return Ok(new { Token = tokenString, User = new { user.Id, user.Email, user.Role, user.Permissions } });
+        return Ok(new { 
+            Token = tokenString, 
+            User = new { user.Id, user.Email, user.Role, user.Permissions },
+            TenantName = tenant.Name,
+            TenantRef = tenant.ReferenceCode
+        });
     }
 
     [HttpPost("super-admin-login")]
