@@ -15,6 +15,7 @@ public record LoginDto(string TenantRef, string Email, string Password);
 public record SuperAdminLoginDto(string Username, string Password);
 public record RegisterTenantDto(string Name, string Username, string Email, string Password);
 public record ChangePasswordDto(string OldPassword, string NewPassword);
+public record UpdateLogoDto(string LogoUrl);
 
 [ApiController]
 [Route("api/auth")]
@@ -184,7 +185,8 @@ public class AuthController : ControllerBase
             Token = tokenString, 
             User = new { user.Id, user.Email, user.Role, user.Permissions },
             TenantName = tenant.Name,
-            TenantRef = tenant.ReferenceCode
+            TenantRef = tenant.ReferenceCode,
+            LogoUrl = tenant.LogoUrl
         });
     }
 
@@ -279,5 +281,27 @@ public class AuthController : ControllerBase
         await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Password changed successfully." });
+    }
+
+    [Authorize]
+    [HttpPost("update-logo")]
+    public async Task<IActionResult> UpdateLogo(UpdateLogoDto dto)
+    {
+        var tenantIdString = User.Claims.FirstOrDefault(c => c.Type == "tenantId")?.Value;
+        if (string.IsNullOrEmpty(tenantIdString) || !Guid.TryParse(tenantIdString, out Guid tenantId))
+        {
+            return Unauthorized("Invalid tenant token");
+        }
+
+        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant == null)
+        {
+            return NotFound("Tenant not found");
+        }
+
+        tenant.LogoUrl = dto.LogoUrl;
+        await _masterContext.SaveChangesAsync();
+
+        return Ok(new { Message = "Logo updated successfully.", LogoUrl = tenant.LogoUrl });
     }
 }
