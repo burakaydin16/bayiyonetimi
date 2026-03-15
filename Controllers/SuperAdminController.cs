@@ -147,7 +147,13 @@ public class SuperAdminController : ControllerBase
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var tokenString = tokenHandler.WriteToken(token);
 
-        return Ok(new { Token = tokenString });
+        return Ok(new { 
+            Token = tokenString, 
+            User = new { owner?.Id, owner?.Email, Role = "Admin", Permissions = "*" },
+            TenantName = tenant.Name,
+            TenantRef = tenant.ReferenceCode,
+            LogoUrl = tenant.LogoUrl
+        });
     }
 
     [HttpPost("reset-tenant-password/{tenantId}")]
