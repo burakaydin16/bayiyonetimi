@@ -139,6 +139,8 @@ public class SuperAdminController : ControllerBase
         await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Password changed successfully." });
+    }
+
     [HttpPost("login-as-tenant/{tenantId}")]
     public async Task<IActionResult> LoginAsTenant(Guid tenantId)
     {
