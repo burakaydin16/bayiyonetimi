@@ -180,21 +180,25 @@ public class SuperAdminController : ControllerBase
             using (var conn = new Npgsql.NpgsqlConnection(connString))
             {
                 await conn.OpenAsync();
-                using (var cmd = conn.CreateCommand())
+                
+                // Check if schema exists first (DO blocks don't support client parameters)
+                bool schemaExists = false;
+                using (var checkCmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = $@"
-                        DO $$
-                        BEGIN
-                            IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = '{tenant.SchemaName}') THEN
-                                UPDATE ""{tenant.SchemaName}"".users 
-                                SET password_hash = @pw 
-                                WHERE email = @email;
-                            END IF;
-                        END $$;";
-                    
-                    cmd.Parameters.AddWithValue("pw", newHashedPassword);
-                    cmd.Parameters.AddWithValue("email", tenant.Email);
-                    await cmd.ExecuteNonQueryAsync();
+                    checkCmd.CommandText = "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = @schema)";
+                    checkCmd.Parameters.AddWithValue("schema", tenant.SchemaName);
+                    schemaExists = (bool?)await checkCmd.ExecuteScalarAsync() ?? false;
+                }
+
+                if (schemaExists)
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = $@"UPDATE ""{tenant.SchemaName}"".users SET password_hash = @pw WHERE email = @email";
+                        cmd.Parameters.AddWithValue("pw", newHashedPassword);
+                        cmd.Parameters.AddWithValue("email", tenant.Email);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
                 }
             }
 
