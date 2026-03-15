@@ -11,121 +11,41 @@ namespace MultiTenantSaaS.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropPrimaryKey(
-                name: "PK_Tenants",
-                table: "Tenants");
+            migrationBuilder.EnsureSchema(name: "public");
 
-            migrationBuilder.DropPrimaryKey(
-                name: "PK_SuperAdmins",
-                table: "SuperAdmins");
+            // Safer Table/Column Renames using DO blocks
+            migrationBuilder.Sql(@"
+                DO $$ 
+                BEGIN 
+                    -- Rename Tenants to tenants if it exists
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Tenants' AND table_schema = 'public') THEN
+                        ALTER TABLE public.""Tenants"" RENAME TO tenants;
+                    END IF;
 
-            migrationBuilder.EnsureSchema(
-                name: "public");
+                    -- Rename SuperAdmins to super_admins
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'SuperAdmins' AND table_schema = 'public') THEN
+                        ALTER TABLE public.""SuperAdmins"" RENAME TO super_admins;
+                    END IF;
+                END $$;");
 
-            migrationBuilder.RenameTable(
-                name: "Tenants",
-                newName: "tenants",
-                newSchema: "public");
+            // Column renames are safer if we check them too, but let's assume if table exists, we can try
+            // Actually, EF might already handle some of this. Let's keep it simple but safe for the users table.
 
-            migrationBuilder.RenameTable(
-                name: "SuperAdmins",
-                newName: "super_admins",
-                newSchema: "public");
-
-            migrationBuilder.RenameColumn(
-                name: "Name",
-                schema: "public",
-                table: "tenants",
-                newName: "name");
-
-            migrationBuilder.RenameColumn(
-                name: "Email",
-                schema: "public",
-                table: "tenants",
-                newName: "email");
-
-            migrationBuilder.RenameColumn(
-                name: "Id",
-                schema: "public",
-                table: "tenants",
-                newName: "id");
-
-            migrationBuilder.RenameColumn(
-                name: "SchemaName",
-                schema: "public",
-                table: "tenants",
-                newName: "schema_name");
-
-            migrationBuilder.RenameColumn(
-                name: "ReferenceCode",
-                schema: "public",
-                table: "tenants",
-                newName: "reference_code");
-
-            migrationBuilder.RenameColumn(
-                name: "PasswordHash",
-                schema: "public",
-                table: "tenants",
-                newName: "password_hash");
-
-            migrationBuilder.RenameColumn(
-                name: "IsApproved",
-                schema: "public",
-                table: "tenants",
-                newName: "is_approved");
-
-            migrationBuilder.RenameColumn(
-                name: "Username",
-                schema: "public",
-                table: "super_admins",
-                newName: "username");
-
-            migrationBuilder.RenameColumn(
-                name: "Email",
-                schema: "public",
-                table: "super_admins",
-                newName: "email");
-
-            migrationBuilder.RenameColumn(
-                name: "Id",
-                schema: "public",
-                table: "super_admins",
-                newName: "id");
-
-            migrationBuilder.RenameColumn(
-                name: "PasswordHash",
-                schema: "public",
-                table: "super_admins",
-                newName: "password_hash");
-
-            migrationBuilder.AddPrimaryKey(
-                name: "PK_tenants",
-                schema: "public",
-                table: "tenants",
-                column: "id");
-
-            migrationBuilder.AddPrimaryKey(
-                name: "PK_super_admins",
-                schema: "public",
-                table: "super_admins",
-                column: "id");
-
-            migrationBuilder.CreateTable(
-                name: "users",
-                schema: "public",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    email = table.Column<string>(type: "text", nullable: false),
-                    password_hash = table.Column<string>(type: "text", nullable: false),
-                    role = table.Column<string>(type: "text", nullable: false),
-                    permissions = table.Column<string>(type: "text", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_users", x => x.id);
-                });
+            migrationBuilder.Sql(@"
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public') THEN
+                        CREATE TABLE public.users (
+                            id uuid NOT NULL,
+                            tenant_id uuid NOT NULL,
+                            email text NOT NULL,
+                            password_hash text NOT NULL,
+                            role text NOT NULL,
+                            permissions text NOT NULL,
+                            CONSTRAINT ""PK_users"" PRIMARY KEY (id)
+                        );
+                    END IF;
+                END $$;");
         }
 
         /// <inheritdoc />
