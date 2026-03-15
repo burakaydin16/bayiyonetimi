@@ -55,8 +55,22 @@ public class AuthController : ControllerBase
 
         var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
-        // Generate a random Reference Code
-        var refCode = "REF-" + new Random().Next(100000, 999999).ToString();
+        // Generate a sequential 6-digit Reference Code starting from 100000
+        var lastTenant = await _masterContext.Tenants
+            .OrderByDescending(t => t.ReferenceCode)
+            .FirstOrDefaultAsync();
+
+        int nextNum = 100000;
+        if (lastTenant != null)
+        {
+            // Try to extract the numeric part from the last code (handles "REF-123" or just "123")
+            var match = System.Text.RegularExpressions.Regex.Match(lastTenant.ReferenceCode, @"\d+");
+            if (match.Success && int.TryParse(match.Value, out int lastNum))
+            {
+                nextNum = Math.Max(100000, lastNum + 1);
+            }
+        }
+        var refCode = nextNum.ToString();
 
         // 1. Create Tenant in Master DB (Pending Approval)
         var tenant = new Tenant
