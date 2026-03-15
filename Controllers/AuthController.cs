@@ -112,31 +112,48 @@ public class AuthController : ControllerBase
         // Explicitly set the schema context for this connection
         var connection = _appContext.Database.GetDbConnection();
         if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+        
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\"";
+            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\", public";
             await cmd.ExecuteNonQueryAsync();
+            
+            // Verify search path for debugging
+            cmd.CommandText = "SHOW search_path";
+            var activePath = await cmd.ExecuteScalarAsync();
+            _logger.LogInformation("Active search_path: {Path}", activePath);
         }
 
         // Also set for interceptor usage in any subsequent EF calls (like SaveChanges)
         _tenantService.CurrentTenant = tenant;
 
         // 3. Find User in Tenant Schema
-        _logger.LogInformation("Attempting login for user {Email} in schema {Schema}", dto.Email, tenant.SchemaName);
-        var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
-        if (user == null) return Unauthorized("Invalid credentials");
+        _logger.LogInformation("Searching for user {Email} in schema {Schema}", dto.Email, tenant.SchemaName);
+        
+        var user = await _appContext.Users
+            .TagWith("LoginLookup")
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
+
+        if (user == null) 
+        {
+            _logger.LogWarning("Login failed: User {Email} not found in schema {Schema}", dto.Email, tenant.SchemaName);
+            return Unauthorized("Kullanıcı bulunamadı (Email veya Firma ID hatalı).");
+        }
+
+        _logger.LogInformation("User found. Checking password...");
 
         bool isPasswordValid = false;
         try 
         {
             isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
         }
-        catch 
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "BCrypt verification error, trying fallback");
             // Fallback for old unhashed passwords
             isPasswordValid = (user.PasswordHash == dto.Password);
             
-            // Auto-migrate to hash here if it was valid? Optional, but good practice.
+            // Auto-migrate to hash
             if (isPasswordValid)
             {
                 user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
@@ -144,7 +161,11 @@ public class AuthController : ControllerBase
             }
         }
 
-        if (!isPasswordValid) return Unauthorized("Invalid credentials");
+        if (!isPasswordValid) 
+        {
+            _logger.LogWarning("Login failed: Password mismatch for user {Email}", dto.Email);
+            return Unauthorized("Şifre hatalı.");
+        }
 
         // 4. Generate JWT
         var tokenHandler = new JwtSecurityTokenHandler();
