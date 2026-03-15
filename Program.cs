@@ -111,11 +111,36 @@ using (var scope = app.Services.CreateScope())
     try
     {
         db.Database.Migrate();
+
+        // Data Migration: Ensure all Tenants have a corresponding User in public.users
+        var tenantsWithoutUsers = db.Tenants
+            .Where(t => !db.Users.Any(u => u.TenantId == t.Id))
+            .ToList();
+
+        if (tenantsWithoutUsers.Any())
+        {
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            logger.LogInformation("Migrating {Count} tenants to centralized users table...", tenantsWithoutUsers.Count);
+            foreach (var t in tenantsWithoutUsers)
+            {
+                db.Users.Add(new MultiTenantSaaS.Entities.User
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = t.Id,
+                    Email = t.Email,
+                    PasswordHash = t.PasswordHash,
+                    Role = "Admin",
+                    Permissions = "*"
+                });
+            }
+            db.SaveChanges();
+            logger.LogInformation("Centralized user migration completed.");
+        }
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while migrating the master database.");
+        logger.LogError(ex, "An error occurred during database migration or user synchronization.");
     }
 }
 

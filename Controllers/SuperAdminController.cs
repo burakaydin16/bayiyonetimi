@@ -73,18 +73,9 @@ public class SuperAdminController : ControllerBase
                             cmd.CommandText = sqlScript;
                             await cmd.ExecuteNonQueryAsync();
 
-                            // 4. Admin kullanıcısını ekle (Raw SQL ile)
-                            _logger.LogInformation("Inserting admin user...");
-                            cmd.CommandText = @"INSERT INTO users (id, email, password_hash, role, permissions) 
-                                               VALUES (@id, @email, @pw, @role, @perm)";
-                            
-                            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
-                            cmd.Parameters.AddWithValue("email", tenant.Email);
-                            cmd.Parameters.AddWithValue("pw", tenant.PasswordHash);
-                            cmd.Parameters.AddWithValue("role", "Admin");
-                            cmd.Parameters.AddWithValue("perm", "*");
-                            
-                            await cmd.ExecuteNonQueryAsync();
+                            // 4. Admin kullanıcısı zaten Master DB'de (public.users) kayıtlı olduğu için
+                            // buraya tekrar eklemeye gerek yok. Sadece şema ve tabloları hazırlıyoruz.
+                            _logger.LogInformation("Database tables created successfully.");
                         }
                         await transaction.CommitAsync();
                     }
@@ -136,16 +127,17 @@ public class SuperAdminController : ControllerBase
         if (tenant == null) return NotFound("Tenant not found");
         if (!tenant.IsApproved) return BadRequest("Cannot login as unapproved tenant");
 
-        // Generate a token that looks like a regular tenant user token
-        // but with a special Role if desired, or just "Admin" to have full access.
+        // Find the owner user in public schema
+        var owner = await _masterContext.Users.FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Role == "Admin");
+
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
         var key = System.Text.Encoding.ASCII.GetBytes(_configuration["Jwt:Key"] ?? "super_secret_key_1234567890123456");
         var tokenDescriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, Guid.Empty.ToString()), // System user
-                new Claim(ClaimTypes.Email, $"superadmin-as-{tenant.ReferenceCode}"),
+                new Claim(ClaimTypes.NameIdentifier, owner?.Id.ToString() ?? Guid.Empty.ToString()),
+                new Claim(ClaimTypes.Email, owner?.Email ?? $"superadmin-as-{tenant.ReferenceCode}"),
                 new Claim("tenantId", tenant.Id.ToString()),
                 new Claim(ClaimTypes.Role, "Admin")
             }),
@@ -171,38 +163,19 @@ public class SuperAdminController : ControllerBase
 
         try
         {
-            // 1. Update Master DB
+            // 1. Update Tenant PasswordHash in Master DB
             tenant.PasswordHash = newHashedPassword;
-            await _masterContext.SaveChangesAsync();
 
-            // 2. Update the User in Tenant Schema (if schema exists)
-            var connString = _configuration.GetConnectionString("DefaultConnection");
-            using (var conn = new Npgsql.NpgsqlConnection(connString))
+            // 2. Clear confusion: Find the specific USER in Master DB and update them too
+            var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Email.ToLower() == tenant.Email.ToLower());
+            if (user != null)
             {
-                await conn.OpenAsync();
-                
-                // Check if schema exists first (DO blocks don't support client parameters)
-                bool schemaExists = false;
-                using (var checkCmd = conn.CreateCommand())
-                {
-                    checkCmd.CommandText = "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = @schema)";
-                    checkCmd.Parameters.AddWithValue("schema", tenant.SchemaName);
-                    schemaExists = (bool?)await checkCmd.ExecuteScalarAsync() ?? false;
-                }
-
-                if (schemaExists)
-                {
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = $@"UPDATE ""{tenant.SchemaName}"".users SET password_hash = @pw WHERE email = @email";
-                        cmd.Parameters.AddWithValue("pw", newHashedPassword);
-                        cmd.Parameters.AddWithValue("email", tenant.Email);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-                }
+                user.PasswordHash = newHashedPassword;
             }
 
-            _logger.LogInformation("Firma '{Name}' şifresi SuperAdmin tarafından sıfırlandı.", tenant.Name);
+            await _masterContext.SaveChangesAsync();
+
+            _logger.LogInformation("Firma '{Name}' (Owner: {Email}) şifresi SuperAdmin tarafından sıfırlandı.", tenant.Name, tenant.Email);
             return Ok(new { Message = "Firmanın şifresi başarıyla güncellendi!" });
         }
         catch (Exception ex)

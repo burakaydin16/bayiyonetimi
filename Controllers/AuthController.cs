@@ -73,9 +73,10 @@ public class AuthController : ControllerBase
         var refCode = nextNum.ToString();
 
         // 1. Create Tenant in Master DB (Pending Approval)
+        var tenantId = Guid.NewGuid();
         var tenant = new Tenant
         {
-            Id = Guid.NewGuid(),
+            Id = tenantId,
             Name = dto.Name,
             Email = dto.Email,
             PasswordHash = hashedPassword,
@@ -84,10 +85,22 @@ public class AuthController : ControllerBase
             IsApproved = false // MUST be approved by Super Admin
         };
 
+        // 2. Create the first Admin User in Master DB (Centralized)
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Email = dto.Email,
+            PasswordHash = hashedPassword,
+            Role = "Admin",
+            Permissions = "*"
+        };
+
         try
         {
-            _logger.LogInformation("Saving Tenant to Master DB (Pending Approval)...");
+            _logger.LogInformation("Saving Tenant and User to Master DB (Pending Approval)...");
             _masterContext.Tenants.Add(tenant);
+            _masterContext.Users.Add(user);
             await _masterContext.SaveChangesAsync();
         }
         catch (Exception ex)
@@ -103,44 +116,29 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginDto dto)
     {
-        // 1. Find Tenant by Reference Code
-        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.ReferenceCode == dto.TenantRef);
-        if (tenant == null) return Unauthorized("Firma bulunamadı. Lütfen geçerli bir Firma ID (Referans) giriniz.");
-
-        if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
-        
-        // Explicitly set the schema context for this connection
-        var connection = _appContext.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
-        
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = $"SET search_path TO \"{tenant.SchemaName}\", public";
-            await cmd.ExecuteNonQueryAsync();
-            
-            // Verify search path for debugging
-            cmd.CommandText = "SHOW search_path";
-            var activePath = await cmd.ExecuteScalarAsync();
-            _logger.LogInformation("Active search_path: {Path}", activePath);
-        }
-
-        // Also set for interceptor usage in any subsequent EF calls (like SaveChanges)
-        _tenantService.CurrentTenant = tenant;
-
-        // 3. Find User in Tenant Schema
-        _logger.LogInformation("Searching for user {Email} in schema {Schema}", dto.Email, tenant.SchemaName);
-        
-        var user = await _appContext.Users
-            .TagWith("LoginLookup")
+        // 1. Find User in Master DB (Centralized)
+        // This is always in 'public' so it's super fast and stable
+        var user = await _masterContext.Users
             .FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
 
         if (user == null) 
         {
-            _logger.LogWarning("Login failed: User {Email} not found in schema {Schema}", dto.Email, tenant.SchemaName);
-            return Unauthorized("Kullanıcı bulunamadı (Email veya Firma ID hatalı).");
+            return Unauthorized("Kullanıcı bulunamadı. Lütfen e-posta adresinizi kontrol edin.");
         }
 
-        _logger.LogInformation("User found. Checking password...");
+        // 2. Find associated Tenant
+        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.Id == user.TenantId);
+        if (tenant == null) return Unauthorized("İlişkili firma kaydı bulunamadı.");
+
+        // Check if Tenant ID matches the one provided in Login (security check)
+        if (tenant.ReferenceCode != dto.TenantRef)
+        {
+            return Unauthorized("Girdiğiniz firma ID'si (Referans) bu kullanıcıya ait değil.");
+        }
+
+        if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
+
+        _logger.LogInformation("User {Email} found for tenant {Name}. Verifying password...", dto.Email, tenant.Name);
 
         bool isPasswordValid = false;
         try 
@@ -150,20 +148,17 @@ public class AuthController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "BCrypt verification error, trying fallback");
-            // Fallback for old unhashed passwords
             isPasswordValid = (user.PasswordHash == dto.Password);
             
-            // Auto-migrate to hash
             if (isPasswordValid)
             {
                 user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
-                await _appContext.SaveChangesAsync();
+                await _masterContext.SaveChangesAsync();
             }
         }
 
         if (!isPasswordValid) 
         {
-            _logger.LogWarning("Login failed: Password mismatch for user {Email}", dto.Email);
             return Unauthorized("Şifre hatalı.");
         }
 
@@ -255,8 +250,8 @@ public class AuthController : ControllerBase
             return Unauthorized("Invalid user token");
         }
 
-        // 2. Find User in DB
-        var user = await _appContext.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        // 2. Find User in Master DB
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user == null)
         {
             return NotFound("User not found");
@@ -270,7 +265,6 @@ public class AuthController : ControllerBase
         } 
         catch 
         {
-            // If the database has an old plaintext password, BCrypt throws an exception
             isOldPasswordValid = (user.PasswordHash == dto.OldPassword);
         }
 
@@ -282,7 +276,7 @@ public class AuthController : ControllerBase
         // 4. Update with New Password (Hashed)
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
         
-        await _appContext.SaveChangesAsync();
+        await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Password changed successfully." });
     }

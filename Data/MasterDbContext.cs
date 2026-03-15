@@ -9,6 +9,7 @@ public class MasterDbContext : DbContext
 
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<SuperAdmin> SuperAdmins { get; set; }
+    public DbSet<User> Users { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -20,6 +21,14 @@ public class MasterDbContext : DbContext
         modelBuilder.Entity<Tenant>().Property(t => t.SchemaName).HasColumnName("schema_name");
         modelBuilder.Entity<Tenant>().Property(t => t.ReferenceCode).HasColumnName("reference_code");
         modelBuilder.Entity<Tenant>().Property(t => t.IsApproved).HasColumnName("is_approved");
+
+        modelBuilder.Entity<User>().ToTable("users", "public");
+        modelBuilder.Entity<User>().Property(u => u.Id).HasColumnName("id");
+        modelBuilder.Entity<User>().Property(u => u.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<User>().Property(u => u.Email).HasColumnName("email");
+        modelBuilder.Entity<User>().Property(u => u.PasswordHash).HasColumnName("password_hash");
+        modelBuilder.Entity<User>().Property(u => u.Role).HasColumnName("role");
+        modelBuilder.Entity<User>().Property(u => u.Permissions).HasColumnName("permissions");
 
         modelBuilder.Entity<SuperAdmin>().ToTable("super_admins", "public");
         modelBuilder.Entity<SuperAdmin>().Property(s => s.Id).HasColumnName("id");

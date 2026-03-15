@@ -8,7 +8,6 @@ public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    public DbSet<User> Users { get; set; }
     public DbSet<Product> Products { get; set; }
     public DbSet<Customer> Customers { get; set; }
     public DbSet<Transaction> Transactions { get; set; }
@@ -17,12 +16,6 @@ public class AppDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<User>().ToTable("users");
-        modelBuilder.Entity<User>().Property(u => u.Id).HasColumnName("id");
-        modelBuilder.Entity<User>().Property(u => u.Email).HasColumnName("email");
-        modelBuilder.Entity<User>().Property(u => u.PasswordHash).HasColumnName("password_hash");
-        modelBuilder.Entity<User>().Property(u => u.Role).HasColumnName("role");
-        modelBuilder.Entity<User>().Property(u => u.Permissions).HasColumnName("permissions");
         modelBuilder.Entity<Product>().ToTable("products");
         modelBuilder.Entity<Product>().Property(p => p.Id).HasColumnName("id");
         modelBuilder.Entity<Product>().Property(p => p.Name).HasColumnName("name");

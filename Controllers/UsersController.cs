@@ -16,19 +16,28 @@ public record UpdateUserPermissionsDto(string Permissions);
 [Authorize(Roles = "Admin,SuperAdmin")] // Only Admins (or Super Admin via login-as) can manage users
 public class UsersController : ControllerBase
 {
-    private readonly AppDbContext _appContext;
+    private readonly MasterDbContext _masterContext;
     private readonly ITenantService _tenantService;
 
-    public UsersController(AppDbContext appContext, ITenantService tenantService)
+    public UsersController(MasterDbContext masterContext, ITenantService tenantService)
     {
-        _appContext = appContext;
+        _masterContext = masterContext;
         _tenantService = tenantService;
+    }
+
+    private Guid GetTenantId()
+    {
+        var tid = User.Claims.FirstOrDefault(c => c.Type == "tenantId")?.Value;
+        if (Guid.TryParse(tid, out Guid tenantId)) return tenantId;
+        return Guid.Empty;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetUsers()
     {
-        var users = await _appContext.Users
+        var tenantId = GetTenantId();
+        var users = await _masterContext.Users
+            .Where(u => u.TenantId == tenantId)
             .Select(u => new { u.Id, u.Email, u.Role, u.Permissions })
             .ToListAsync();
         return Ok(users);
@@ -37,7 +46,10 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateUser(CreateUserDto dto)
     {
-        if (await _appContext.Users.AnyAsync(u => u.Email == dto.Email))
+        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty) return Unauthorized("Tenant information missing.");
+
+        if (await _masterContext.Users.AnyAsync(u => u.Email.ToLower() == dto.Email.ToLower()))
         {
             return BadRequest(new { Message = "Bu e-posta adresi ile zaten bir kullanıcı mevcut." });
         }
@@ -45,14 +57,15 @@ public class UsersController : ControllerBase
         var user = new User
         {
             Id = Guid.NewGuid(),
+            TenantId = tenantId,
             Email = dto.Email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
             Role = dto.Role,
             Permissions = dto.Permissions
         };
 
-        _appContext.Users.Add(user);
-        await _appContext.SaveChangesAsync();
+        _masterContext.Users.Add(user);
+        await _masterContext.SaveChangesAsync();
 
         return Ok(new { user.Id, user.Email, user.Role, user.Permissions });
     }
@@ -60,14 +73,12 @@ public class UsersController : ControllerBase
     [HttpPut("{id}/permissions")]
     public async Task<IActionResult> UpdatePermissions(Guid id, UpdateUserPermissionsDto dto)
     {
-        var user = await _appContext.Users.FindAsync(id);
+        var tenantId = GetTenantId();
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.Id == id && u.TenantId == tenantId);
         if (user == null) return NotFound();
 
-        // Prevent changing own permissions if you are the only admin? 
-        // For now, allow it.
-        
         user.Permissions = dto.Permissions;
-        await _appContext.SaveChangesAsync();
+        await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Yetkiler güncellendi." });
     }
@@ -75,7 +86,8 @@ public class UsersController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteUser(Guid id)
     {
-        var user = await _appContext.Users.FindAsync(id);
+        var tenantId = GetTenantId();
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.Id == id && u.TenantId == tenantId);
         if (user == null) return NotFound();
 
         // Don't allow deleting yourself
@@ -85,8 +97,8 @@ public class UsersController : ControllerBase
             return BadRequest(new { Message = "Kendi hesabınızı silemezsiniz." });
         }
 
-        _appContext.Users.Remove(user);
-        await _appContext.SaveChangesAsync();
+        _masterContext.Users.Remove(user);
+        await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Kullanıcı silindi." });
     }
