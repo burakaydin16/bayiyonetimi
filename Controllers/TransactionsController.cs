@@ -98,12 +98,32 @@ public class TransactionsController : ControllerBase
                 {
                     case "Gonderilen":
                         product.Stock -= itemDto.Quantity;
+                        // Bağlı depozito varsa, onun da fiziksel (depo) stoğu azalır
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock -= itemDto.Quantity;
+                        }
                         break;
                     case "IadeAlinan":
                         product.Stock += itemDto.Quantity;
+                        // İade aldığımızda o ürünün (veya bağlı iadesinin) depo stoğu artar
+                        // Ürün zaten "DEPOSIT" ise (boş kap) yukarıda kendi stoğu arttı.
+                        // Eğer dolu iadesi yapılıyorsa bağlı depo ürünü stoğu da artmalı
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock += itemDto.Quantity;
+                        }
                         break;
                     case "StokGirisi":
                         product.Stock += itemDto.Quantity;
+                        // Fabrikadan su aldığımızda, o su damacana ile geldiği için damacana stoğumuz da artar
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock += itemDto.Quantity;
+                        }
                         break;
                 }
 
