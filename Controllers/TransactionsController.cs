@@ -129,13 +129,16 @@ public class TransactionsController : ControllerBase
 
                 // 4. Depozito defteri güncelle (Müşteri varsa)
                 Guid? targetDepositId = null;
+                string pType = (product.Type ?? "").Trim();
+                
                 // UI'dan gelen ProductType değerleri: "Su", "Depozito (Boş)", "Diğer"
-                if (product.Type == "Depozito (Boş)") targetDepositId = product.Id; 
-                else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value;
+                if (pType.Equals("Depozito (Boş)", StringComparison.OrdinalIgnoreCase)) 
+                    targetDepositId = product.Id; 
+                else if (product.LinkedDepositId.HasValue) 
+                    targetDepositId = product.LinkedDepositId.Value;
 
                 if (dto.CustomerId.HasValue && targetDepositId.HasValue)
                 {
-                    // Ledger'ı önce hafızadan (Local) sonra veritabanından ara (Aynı faturada birden çok benzer kalem olabilir)
                     var ledger = _context.DepositLedgers.Local
                         .FirstOrDefault(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == targetDepositId.Value);
                     
@@ -150,15 +153,11 @@ public class TransactionsController : ControllerBase
                         _context.DepositLedgers.Add(ledger);
                     }
 
-                    switch (itemDto.ItemType)
-                    {
-                        case "Gonderilen":
-                            ledger.Balance += itemDto.Quantity; // Müşterideki emanet artar
-                            break;
-                        case "IadeAlinan":
-                            ledger.Balance -= itemDto.Quantity; // Müşterideki emanet azalır
-                            break;
-                    }
+                    string iType = (itemDto.ItemType ?? "").Trim();
+                    if (iType.Equals("Gonderilen", StringComparison.OrdinalIgnoreCase))
+                        ledger.Balance += itemDto.Quantity;
+                    else if (iType.Equals("IadeAlinan", StringComparison.OrdinalIgnoreCase))
+                        ledger.Balance -= itemDto.Quantity;
                 }
             }
         }
