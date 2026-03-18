@@ -135,8 +135,14 @@ public class TransactionsController : ControllerBase
 
                 if (dto.CustomerId.HasValue && targetDepositId.HasValue)
                 {
-                    var ledger = await _context.DepositLedgers
-                        .FirstOrDefaultAsync(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == targetDepositId.Value);
+                    // Ledger'ı önce hafızadan (Local) sonra veritabanından ara (Aynı faturada birden çok benzer kalem olabilir)
+                    var ledger = _context.DepositLedgers.Local
+                        .FirstOrDefault(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == targetDepositId.Value);
+                    
+                    if (ledger == null) {
+                        ledger = await _context.DepositLedgers
+                            .FirstOrDefaultAsync(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == targetDepositId.Value);
+                    }
 
                     if (ledger == null)
                     {
