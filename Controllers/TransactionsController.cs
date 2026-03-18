@@ -191,26 +191,44 @@ public class TransactionsController : ControllerBase
                 switch (item.ItemType)
                 {
                     case "Gonderilen":
-                        product.Stock += item.Quantity; // Geri al
+                        product.Stock += item.Quantity; // Depo stoğunu geri koy
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock += item.Quantity;
+                        }
                         break;
                     case "IadeAlinan":
-                        product.Stock -= item.Quantity;
+                        product.Stock -= item.Quantity; // Depo stoğunu geri azalt
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock -= item.Quantity;
+                        }
                         break;
                     case "StokGirisi":
-                        product.Stock -= item.Quantity;
+                        product.Stock -= item.Quantity; // Depo stoğunu geri azalt
+                        if (product.LinkedDepositId.HasValue) 
+                        {
+                            var linked = await _context.Products.FindAsync(product.LinkedDepositId.Value);
+                            if (linked != null) linked.Stock -= item.Quantity;
+                        }
                         break;
                 }
 
-                // Depozito ters
-                if (transaction.CustomerId.HasValue && product.LinkedDepositId.HasValue)
+                // Depozito tersi (Müşteri emanetini düzelt)
+                Guid? targetDepositId = null;
+                if (product.Type == "DEPOSIT") targetDepositId = product.Id;
+                else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value;
+
+                if (transaction.CustomerId.HasValue && targetDepositId.HasValue)
                 {
-                    var depositProductId = product.LinkedDepositId.Value;
                     var ledger = await _context.DepositLedgers
-                        .FirstOrDefaultAsync(dl => dl.CustomerId == transaction.CustomerId.Value && dl.ProductId == depositProductId);
+                        .FirstOrDefaultAsync(dl => dl.CustomerId == transaction.CustomerId.Value && dl.ProductId == targetDepositId.Value);
                     if (ledger != null)
                     {
-                        if (item.ItemType == "Gonderilen") ledger.Balance -= item.Quantity;
-                        if (item.ItemType == "IadeAlinan") ledger.Balance += item.Quantity;
+                        if (item.ItemType == "Gonderilen") ledger.Balance -= item.Quantity; // Artan emaneti geri çek
+                        else if (item.ItemType == "IadeAlinan") ledger.Balance += item.Quantity; // Azalan emaneti geri arttır
                     }
                 }
             }
