@@ -56,13 +56,22 @@ public class TransactionsController : ControllerBase
     [HttpPost("process")]
     public async Task<IActionResult> Process([FromBody] TransactionProcessDto dto)
     {
-        // 1. Hareket başlığını oluştur
+        // 1. Hareket başlığını hesapla (Gidenler Pozitif, Gelenler/İadeler Negatif)
+        decimal netAmount = 0;
+        foreach (var i in dto.Items)
+        {
+            if (i.ItemType == "IadeAlinan")
+                netAmount -= (i.Quantity * i.UnitPrice);
+            else
+                netAmount += (i.Quantity * i.UnitPrice);
+        }
+
         var transaction = new Transaction
         {
             Id = Guid.NewGuid(),
             Date = dto.Date ?? DateTime.UtcNow,
             CustomerId = dto.CustomerId,
-            TotalAmount = dto.Items.Sum(i => i.Quantity * i.UnitPrice),
+            TotalAmount = netAmount,
             Notes = dto.Notes,
             Type = dto.Type
         };
@@ -98,26 +107,29 @@ public class TransactionsController : ControllerBase
                         break;
                 }
 
-                // 4. Depozito defteri güncelle (eğer depozitolu ürünse ve müşteri varsa)
-                if (dto.CustomerId.HasValue && product.LinkedDepositId.HasValue)
+                // 4. Depozito defteri güncelle (Müşteri varsa)
+                Guid? targetDepositId = null;
+                if (product.Type == "DEPOSIT") targetDepositId = product.Id; // Doğrudan boş şişe/palet iadesi ise
+                else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value; // Su satıldıysa bağlı boşu etkile
+
+                if (dto.CustomerId.HasValue && targetDepositId.HasValue)
                 {
-                    var depositProductId = product.LinkedDepositId.Value;
                     var ledger = await _context.DepositLedgers
-                        .FirstOrDefaultAsync(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == depositProductId);
+                        .FirstOrDefaultAsync(dl => dl.CustomerId == dto.CustomerId.Value && dl.ProductId == targetDepositId.Value);
 
                     if (ledger == null)
                     {
-                        ledger = new DepositLedger { CustomerId = dto.CustomerId.Value, ProductId = depositProductId, Balance = 0 };
+                        ledger = new DepositLedger { CustomerId = dto.CustomerId.Value, ProductId = targetDepositId.Value, Balance = 0 };
                         _context.DepositLedgers.Add(ledger);
                     }
 
                     switch (itemDto.ItemType)
                     {
                         case "Gonderilen":
-                            ledger.Balance += itemDto.Quantity; // Müşteride damacana artar
+                            ledger.Balance += itemDto.Quantity; // Müşterideki emanet artar
                             break;
                         case "IadeAlinan":
-                            ledger.Balance -= itemDto.Quantity; // Müşteride damacana azalır
+                            ledger.Balance -= itemDto.Quantity; // Müşterideki emanet azalır
                             break;
                     }
                 }
