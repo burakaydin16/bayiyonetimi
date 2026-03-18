@@ -129,8 +129,9 @@ public class TransactionsController : ControllerBase
 
                 // 4. Depozito defteri güncelle (Müşteri varsa)
                 Guid? targetDepositId = null;
-                if (product.Type == "DEPOSIT") targetDepositId = product.Id; // Doğrudan boş şişe/palet iadesi ise
-                else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value; // Su satıldıysa bağlı boşu etkile
+                // UI'dan gelen ProductType değerleri: "Su", "Depozito (Boş)", "Diğer"
+                if (product.Type == "Depozito (Boş)") targetDepositId = product.Id; 
+                else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value;
 
                 if (dto.CustomerId.HasValue && targetDepositId.HasValue)
                 {
@@ -218,7 +219,7 @@ public class TransactionsController : ControllerBase
 
                 // Depozito tersi (Müşteri emanetini düzelt)
                 Guid? targetDepositId = null;
-                if (product.Type == "DEPOSIT") targetDepositId = product.Id;
+                if (product.Type == "Depozito (Boş)") targetDepositId = product.Id;
                 else if (product.LinkedDepositId.HasValue) targetDepositId = product.LinkedDepositId.Value;
 
                 if (transaction.CustomerId.HasValue && targetDepositId.HasValue)
