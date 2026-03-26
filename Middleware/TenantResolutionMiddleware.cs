@@ -36,6 +36,12 @@ public class TenantResolutionMiddleware
             var tenant = await masterContext.Tenants.FindAsync(tenantId);
             if (tenant != null)
             {
+                if (!tenant.IsActive)
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await context.Response.WriteAsJsonAsync(new { Error = "Hesabınız askıya alınmıştır. Lütfen sistem yöneticisi ile iletişime geçin." });
+                    return;
+                }
                 tenantService.CurrentTenant = tenant;
             }
         }

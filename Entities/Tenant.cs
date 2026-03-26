@@ -12,5 +12,6 @@ public class Tenant
     public string PasswordHash { get; set; } = string.Empty; 
     public string ReferenceCode { get; set; } = string.Empty; // e.g., "BAYI-1001"
     public bool IsApproved { get; set; } = false; // Requires Super Admin approval
+    public bool IsActive { get; set; } = true; // For suspending tenant account
     public string? LogoUrl { get; set; } // Base64 or URL to tenant logo
 }

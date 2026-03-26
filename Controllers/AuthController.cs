@@ -25,14 +25,16 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _appContext;
     private readonly IConfiguration _configuration;
     private readonly ITenantService _tenantService;
+    private readonly IEmailService _emailService;
     private readonly ILogger<AuthController> _logger;
 
-    public AuthController(MasterDbContext masterContext, AppDbContext appContext, IConfiguration configuration, ITenantService tenantService, ILogger<AuthController> logger)
+    public AuthController(MasterDbContext masterContext, AppDbContext appContext, IConfiguration configuration, ITenantService tenantService, IEmailService emailService, ILogger<AuthController> logger)
     {
         _masterContext = masterContext;
         _appContext = appContext;
         _configuration = configuration;
         _tenantService = tenantService;
+        _emailService = emailService;
         _logger = logger;
     }
 
@@ -103,6 +105,9 @@ public class AuthController : ControllerBase
             _masterContext.Tenants.Add(tenant);
             _masterContext.Users.Add(user);
             await _masterContext.SaveChangesAsync();
+
+            // 3. Send Notification to Super Admin
+            await _emailService.SendNewRegistrationNotificationAsync(tenant.Name, tenant.Email);
         }
         catch (Exception ex)
         {
@@ -138,6 +143,7 @@ public class AuthController : ControllerBase
         }
 
         if (!tenant.IsApproved) return Unauthorized("Firma kaydınız henüz sistem yöneticisi tarafından onaylanmamış.");
+        if (!tenant.IsActive) return Unauthorized("Firma hesabınız askıya alınmıştır. Lütfen sistem yöneticisi ile iletişime geçin.");
 
         _logger.LogInformation("User {Email} found for tenant {Name}. Verifying password...", dto.Email, tenant.Name);
 

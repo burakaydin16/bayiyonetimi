@@ -34,7 +34,7 @@ public class SuperAdminController : ControllerBase
     public async Task<IActionResult> GetTenants()
     {
         var tenants = await _masterContext.Tenants.ToListAsync();
-        return Ok(tenants.Select(t => new { t.Id, t.Name, t.Email, t.ReferenceCode, t.IsApproved, t.SchemaName }));
+        return Ok(tenants.Select(t => new { t.Id, t.Name, t.Email, t.ReferenceCode, t.IsApproved, t.IsActive, t.SchemaName }));
     }
 
     [HttpPost("approve-tenant/{tenantId}")]
@@ -195,6 +195,57 @@ public class SuperAdminController : ControllerBase
         {
             _logger.LogError(ex, "Şifre resetleme hatası");
             return BadRequest(new { Error = ex.Message });
+        }
+    }
+
+    [HttpPost("toggle-tenant-status/{tenantId}")]
+    public async Task<IActionResult> ToggleTenantStatus(Guid tenantId)
+    {
+        var tenant = await _masterContext.Tenants.FindAsync(tenantId);
+        if (tenant == null) return NotFound("Firma bulunamadı.");
+
+        tenant.IsActive = !tenant.IsActive;
+        await _masterContext.SaveChangesAsync();
+
+        return Ok(new { Message = tenant.IsActive ? "Firma hesabı aktif edildi." : "Firma hesabı pasife alındı.", IsActive = tenant.IsActive });
+    }
+
+    [HttpDelete("tenant/{tenantId}")]
+    public async Task<IActionResult> DeleteTenant(Guid tenantId)
+    {
+        var tenant = await _masterContext.Tenants.FindAsync(tenantId);
+        if (tenant == null) return NotFound("Firma bulunamadı.");
+
+        try
+        {
+            var connString = _configuration.GetConnectionString("DefaultConnection");
+            using (var conn = new Npgsql.NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+                
+                // Drop the tenant schema to delete all related data safely (isolated per tenant)
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = $"DROP SCHEMA IF EXISTS \"{tenant.SchemaName}\" CASCADE;";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            // Remove associated administrative users in Master DB (Centralized Users)
+            var users = await _masterContext.Users.Where(u => u.TenantId == tenant.Id).ToListAsync();
+            _masterContext.Users.RemoveRange(users);
+
+            // Remove the tenant from Master DB
+            _masterContext.Tenants.Remove(tenant);
+            await _masterContext.SaveChangesAsync();
+
+            _logger.LogInformation("Firma '{Name}' ({Id}) tüm verileriyle Super Admin tarafından silindi.", tenant.Name, tenant.Id);
+            return Ok(new { Message = "Firma ve tüm verileri başarıyla silindi." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Firma silme hatası");
+            return BadRequest(new { Error = "Firma silinirken bir hata oluştu: " + ex.Message });
         }
     }
 }
