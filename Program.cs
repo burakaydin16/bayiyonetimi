@@ -27,8 +27,9 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// 2. Tenant Service (Scoped per request)
+// 2. Tenant Service & Email Service (Scoped per request)
 builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 // 3. Database Configuration
 var connString = builder.Configuration.GetConnectionString("DefaultConnection");

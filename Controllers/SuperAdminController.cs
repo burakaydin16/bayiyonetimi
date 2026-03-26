@@ -17,14 +17,16 @@ public class SuperAdminController : ControllerBase
     private readonly AppDbContext _appContext;
     private readonly IConfiguration _configuration;
     private readonly ITenantService _tenantService;
+    private readonly IEmailService _emailService;
     private readonly ILogger<SuperAdminController> _logger;
 
-    public SuperAdminController(MasterDbContext masterContext, AppDbContext appContext, IConfiguration configuration, ITenantService tenantService, ILogger<SuperAdminController> logger)
+    public SuperAdminController(MasterDbContext masterContext, AppDbContext appContext, IConfiguration configuration, ITenantService tenantService, IEmailService emailService, ILogger<SuperAdminController> logger)
     {
         _masterContext = masterContext;
         _appContext = appContext;
         _configuration = configuration;
         _tenantService = tenantService;
+        _emailService = emailService;
         _logger = logger;
     }
 
@@ -91,6 +93,9 @@ public class SuperAdminController : ControllerBase
             // 5. Master DB'de onayla
             tenant.IsApproved = true;
             await _masterContext.SaveChangesAsync();
+
+            // 6. Onay mailini gönder
+            await _emailService.SendApprovalEmailAsync(tenant.Email, tenant.Name, tenant.ReferenceCode);
 
             _logger.LogInformation("Firma '{Name}' başarıyla hazırlandı.", tenant.Name);
             return Ok(new { Message = "Firma başarıyla onaylandı ve veritabanı hazırlandı!" });
