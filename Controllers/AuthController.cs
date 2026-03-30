@@ -284,27 +284,18 @@ public class AuthController : ControllerBase
     [HttpPost("super-admin-login")]
     public async Task<IActionResult> SuperAdminLogin(SuperAdminLoginDto dto)
     {
+        // Security: Always find strictly from database. Seed data ensures there is at least one admin.
         var admin = await _masterContext.SuperAdmins.FirstOrDefaultAsync(a => a.Username == dto.Username || a.Email == dto.Username);
         
-        // Setup initial default super admin if none exists 
-        if (admin == null && dto.Username == "superadmin" && dto.Password == "nisan2023!")
+        if (admin == null)
         {
-            admin = new SuperAdmin {
-                Id = Guid.NewGuid(),
-                Username = "superadmin",
-                Email = "admin@nisanaydin.com.tr",
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("nisan2023!")
-            };
-            _masterContext.SuperAdmins.Add(admin);
-            await _masterContext.SaveChangesAsync();
-        }
-        else if (admin == null)
-        {
+            _logger.LogWarning("Failed SuperAdmin login attempt for username: {Username}", dto.Username);
             return Unauthorized("Geçersiz süper admin bilgileri.");
         }
 
         if (!BCrypt.Net.BCrypt.Verify(dto.Password, admin.PasswordHash))
         {
+            _logger.LogWarning("Failed SuperAdmin login attempt (invalid password) for user: {Email}", admin.Email);
             return Unauthorized("Geçersiz süper admin bilgileri.");
         }
 
@@ -327,6 +318,57 @@ public class AuthController : ControllerBase
         return Ok(new { Token = tokenString });
     }
 
+    [HttpPost("super-admin-forgot-password")]
+    public async Task<IActionResult> SuperAdminForgotPassword([FromBody] SuperAdminForgotPasswordDto dto)
+    {
+        // Always return success to prevent email enumeration
+        var admin = await _masterContext.SuperAdmins.FirstOrDefaultAsync(a => a.Email == dto.Email);
+        if (admin == null)
+        {
+            _logger.LogWarning("Super admin forgot-password attempt for non-existent email: {Email}", dto.Email);
+            return Ok(new { Message = "Eğer bu e-posta adresi kayıtlıysa, şifre sıfırlama bağlantısı gönderilmiştir." });
+        }
+
+        // Generate secure token
+        var resetToken = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        admin.PasswordResetToken = resetToken;
+        admin.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
+        await _masterContext.SaveChangesAsync();
+
+        // Build reset link pointing to admin panel
+        var adminPanelUrl = _configuration["EmailSettings:AdminPanelUrl"] ?? "https://admin.nisanaydin.com.tr/";
+        var resetLink = $"{adminPanelUrl}?reset_token={Uri.EscapeDataString(resetToken)}";
+
+        await _emailService.SendPasswordResetAsync(admin.Email, resetLink);
+
+        _logger.LogInformation("Super admin password reset email sent to {Email}", admin.Email);
+        return Ok(new { Message = "Eğer bu e-posta adresi kayıtlıysa, şifre sıfırlama bağlantısı gönderilmiştir." });
+    }
+
+    [HttpPost("super-admin-reset-password")]
+    public async Task<IActionResult> SuperAdminResetPassword([FromBody] SuperAdminResetPasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Token) || string.IsNullOrWhiteSpace(dto.NewPassword))
+            return BadRequest(new { Message = "Token ve yeni şifre gereklidir." });
+
+        if (dto.NewPassword.Length < 6)
+            return BadRequest(new { Message = "Şifre en az 6 karakter olmalıdır." });
+
+        var admin = await _masterContext.SuperAdmins.FirstOrDefaultAsync(a => a.PasswordResetToken == dto.Token);
+        if (admin == null || admin.PasswordResetTokenExpiry == null || admin.PasswordResetTokenExpiry < DateTime.UtcNow)
+        {
+            return BadRequest(new { Message = "Geçersiz veya süresi dolmuş bağlantı. Lütfen tekrar şifre sıfırlama talebinde bulunun." });
+        }
+
+        admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        admin.PasswordResetToken = null;
+        admin.PasswordResetTokenExpiry = null;
+        await _masterContext.SaveChangesAsync();
+
+        _logger.LogInformation("Super admin password reset completed for {Email}", admin.Email);
+        return Ok(new { Message = "Parolanız başarıyla değiştirildi. Şimdi giriş yapabilirsiniz." });
+    }
+
     [Authorize]
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword(ChangePasswordDto dto)
@@ -336,21 +378,18 @@ public class AuthController : ControllerBase
             return BadRequest(new { Message = "Old and new passwords are required." });
         }
 
-        // 1. Get logged in user's ID from JWT Claims
         var userIdString = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId))
         {
             return Unauthorized("Invalid user token");
         }
 
-        // 2. Find User in Master DB
         var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user == null)
         {
             return NotFound("User not found");
         }
 
-        // 3. Verify Old Password safely
         bool isOldPasswordValid = false;
         try 
         {
@@ -366,9 +405,7 @@ public class AuthController : ControllerBase
             return BadRequest(new { Message = "Incorrect old password." });
         }
 
-        // 4. Update with New Password (Hashed)
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
-        
         await _masterContext.SaveChangesAsync();
 
         return Ok(new { Message = "Password changed successfully." });
@@ -396,3 +433,7 @@ public class AuthController : ControllerBase
         return Ok(new { Message = "Logo updated successfully.", LogoUrl = tenant.LogoUrl });
     }
 }
+
+public record SuperAdminForgotPasswordDto(string Email);
+public record SuperAdminResetPasswordDto(string Token, string NewPassword);
+

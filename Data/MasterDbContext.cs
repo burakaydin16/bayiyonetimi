@@ -42,5 +42,14 @@ public class MasterDbContext : DbContext
         modelBuilder.Entity<SuperAdmin>().Property(s => s.Username).HasColumnName("username");
         modelBuilder.Entity<SuperAdmin>().Property(s => s.Email).HasColumnName("email");
         modelBuilder.Entity<SuperAdmin>().Property(s => s.PasswordHash).HasColumnName("password_hash");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.PasswordResetToken).HasColumnName("password_reset_token");
+        modelBuilder.Entity<SuperAdmin>().Property(s => s.PasswordResetTokenExpiry).HasColumnName("password_reset_token_expiry");
+        modelBuilder.Entity<SuperAdmin>().HasData(new SuperAdmin
+        {
+            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+            Username = "superadmin",
+            Email = "bayiyonetimi016@gmail.com",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("nisan2023!")
+        });
     }
 }
