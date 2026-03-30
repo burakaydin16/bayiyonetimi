@@ -142,4 +142,107 @@ public class EmailService : IEmailService
             _logger.LogError(ex, "Yöneticiye üyelik talebi e-postası gönderilirken hata oluştu.");
         }
     }
+
+    public async Task SendEmailVerificationAsync(string toEmail, string companyName, string verificationLink)
+    {
+        try
+        {
+            var host = _configuration["EmailSettings:Host"];
+            if (string.IsNullOrEmpty(host)) return;
+
+            var port = int.Parse(_configuration["EmailSettings:Port"] ?? "587");
+            var username = _configuration["EmailSettings:Username"];
+            var password = _configuration["EmailSettings:Password"];
+            var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
+            var fromEmail = _configuration["EmailSettings:FromEmail"] ?? username;
+
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(username, password),
+                EnableSsl = enableSsl
+            };
+
+            var mailMessage = new MailMessage
+            {
+                From = new MailAddress(fromEmail, "SuTakip Bayi Yönetimi"),
+                Subject = "E-Posta Adresinizi Doğrulayın",
+                IsBodyHtml = true,
+                Body = $@"
+                    <div style='font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-top: 5px solid #0071E3; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);'>
+                        <div style='padding: 30px;'>
+                            <h2 style='color: #0071E3; margin-top: 0;'>E-Posta Adresinizi Doğrulayın</h2>
+                            <p style='font-size: 16px; line-height: 1.5;'>Merhaba <strong>{companyName}</strong>,</p>
+                            <p style='font-size: 16px; line-height: 1.5;'>Sistemimize kayıt olduğunuz için teşekkür ederiz. Kayıt işleminizin admin onayına iletilebilmesi ve güvenlik sebepleriyle lütfen e-posta adresinizi doğrulayınız.</p>
+                            
+                            <div style='text-align: center; margin: 40px 0;'>
+                                <a href='{verificationLink}' style='background-color: #0071E3; color: white; padding: 16px 32px; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 15px rgba(0, 113, 227, 0.4);'>
+                                    E-Posta Adresimi Doğrula
+                                </a>
+                            </div>
+
+                            <p style='font-size: 14px; line-height: 1.5; color: #666;'>Eğer butona tıklayamıyorsanız, aşağıdaki linki kopyalayıp tarayıcınıza yapıştırın:</p>
+                            <p style='font-size: 12px; word-break: break-all; color: #0071E3;'>{verificationLink}</p>
+                        </div>
+                    </div>"
+            };
+
+            mailMessage.To.Add(toEmail);
+            await client.SendMailAsync(mailMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "E-posta doğrulama maili gönderilirken hata oluştu.");
+        }
+    }
+
+    public async Task SendPasswordResetAsync(string toEmail, string resetLink)
+    {
+        try
+        {
+            var host = _configuration["EmailSettings:Host"];
+            if (string.IsNullOrEmpty(host)) return;
+
+            var port = int.Parse(_configuration["EmailSettings:Port"] ?? "587");
+            var username = _configuration["EmailSettings:Username"];
+            var password = _configuration["EmailSettings:Password"];
+            var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
+            var fromEmail = _configuration["EmailSettings:FromEmail"] ?? username;
+
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(username, password),
+                EnableSsl = enableSsl
+            };
+
+            var mailMessage = new MailMessage
+            {
+                From = new MailAddress(fromEmail, "SuTakip Bayi Yönetimi"),
+                Subject = "Parola Sıfırlama Talebi",
+                IsBodyHtml = true,
+                Body = $@"
+                    <div style='font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-top: 5px solid #EF4444; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);'>
+                        <div style='padding: 30px;'>
+                            <h2 style='color: #EF4444; margin-top: 0;'>Parolanızı Sıfırlayın</h2>
+                            <p style='font-size: 16px; line-height: 1.5;'>Merhaba,</p>
+                            <p style='font-size: 16px; line-height: 1.5;'>Hesabınız için parola sıfırlama talebinde bulundunuz. Yeni bir parola belirlemek için aşağıdaki bağlantıya tıklayın. Bu bağlantı sadece 24 saat geçerlidir.</p>
+                            
+                            <div style='text-align: center; margin: 40px 0;'>
+                                <a href='{resetLink}' style='background-color: #EF4444; color: white; padding: 16px 32px; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);'>
+                                    Parolamı Sıfırla
+                                </a>
+                            </div>
+
+                            <p style='font-size: 14px; line-height: 1.5; color: #666;'>Bu işlemi siz yapmadıysanız, e-postayı dikkate almayınız.</p>
+                        </div>
+                    </div>"
+            };
+
+            mailMessage.To.Add(toEmail);
+            await client.SendMailAsync(mailMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Parola sıfırlama maili gönderilirken hata oluştu.");
+        }
+    }
 }

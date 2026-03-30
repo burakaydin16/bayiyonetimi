@@ -77,6 +77,8 @@ public class AuthController : ControllerBase
 
         // 1. Create Tenant in Master DB (Pending Approval)
         var tenantId = Guid.NewGuid();
+        var verificationToken = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(64)).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+
         var tenant = new Tenant
         {
             Id = tenantId,
@@ -96,18 +98,25 @@ public class AuthController : ControllerBase
             Email = dto.Email,
             PasswordHash = hashedPassword,
             Role = "Admin",
-            Permissions = "*"
+            Permissions = "*",
+            IsEmailVerified = false,
+            EmailVerificationToken = verificationToken,
+            EmailVerificationTokenExpiry = DateTime.UtcNow.AddHours(24)
         };
 
         try
         {
-            _logger.LogInformation("Saving Tenant and User to Master DB (Pending Approval)...");
+            _logger.LogInformation("Saving Tenant and User to Master DB (Pending Email Verification)...");
             _masterContext.Tenants.Add(tenant);
             _masterContext.Users.Add(user);
             await _masterContext.SaveChangesAsync();
 
-            // 3. Send Notification to Super Admin
-            await _emailService.SendNewRegistrationNotificationAsync(tenant.Name, tenant.Email);
+            // 3. Send Verification Email (Not Admin notification yet!)
+            var origin = Request.Headers["Origin"].ToString();
+            if (string.IsNullOrEmpty(origin)) origin = "http://localhost:5173"; // fallback
+            var verificationLink = $"{origin}/verify-email?token={verificationToken}";
+
+            await _emailService.SendEmailVerificationAsync(user.Email, tenant.Name, verificationLink);
         }
         catch (Exception ex)
         {
@@ -115,8 +124,84 @@ public class AuthController : ControllerBase
             return BadRequest(new { Error = "Kayıt işlemi sırasında bir hata oluştu." });
         }
 
-        _logger.LogInformation("RegisterTenant pending approval for {Email}", dto.Email);
-        return Ok(new { Message = "Kayıt başarılı. Sistem yöneticisinin onayından sonra giriş yapabilirsiniz.", ReferenceCode = refCode });
+        _logger.LogInformation("RegisterTenant pending email verification for {Email}", dto.Email);
+        return Ok(new { Message = "Kayıt başarılı. Lütfen e-posta adresinize gönderilen doğrulama bağlantısına tıklayınız.", ReferenceCode = refCode });
+    }
+
+    [HttpPost("verify-email")]
+    public async Task<IActionResult> VerifyEmail([FromQuery] string token)
+    {
+        if (string.IsNullOrEmpty(token)) return BadRequest("Token bulunamadı.");
+
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.EmailVerificationToken == token);
+        if (user == null) return BadRequest("Geçersiz doğrulama bağlantısı.");
+
+        if (user.EmailVerificationTokenExpiry < DateTime.UtcNow)
+            return BadRequest("Doğrulama bağlantısının süresi dolmuş. Lütfen tekrar kayıt olun veya destek ile iletişime geçin.");
+
+        var tenant = await _masterContext.Tenants.FirstOrDefaultAsync(t => t.Id == user.TenantId);
+        if (tenant == null) return BadRequest("İlgili firma bulunamadı.");
+
+        user.IsEmailVerified = true;
+        user.EmailVerificationToken = null;
+        user.EmailVerificationTokenExpiry = null;
+
+        await _masterContext.SaveChangesAsync();
+
+        // 4. NOW notify the SuperAdmin that the email was verified and it is ready for approval
+        await _emailService.SendNewRegistrationNotificationAsync(tenant.Name, tenant.Email);
+
+        return Ok(new { Message = "E-posta başarıyla doğrulandı. Üyeliğiniz sistem yöneticisi onayına sunulmuştur." });
+    }
+
+    public record ForgotPasswordDto(string Email);
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Email)) return BadRequest("E-posta adresi gereklidir.");
+
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
+        if (user == null) return Ok(new { Message = "Eğer bu e-posta sistemde kayıtlıysa, parola sıfırlama linki gönderildi." }); // Security best practice
+
+        var resetToken = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(64)).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        user.PasswordResetToken = resetToken;
+        user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(24);
+        
+        await _masterContext.SaveChangesAsync();
+
+        var origin = Request.Headers["Origin"].ToString();
+        if (string.IsNullOrEmpty(origin)) origin = "http://localhost:5173"; // fallback
+        var resetLink = $"{origin}/reset-password?token={resetToken}";
+
+        await _emailService.SendPasswordResetAsync(user.Email, resetLink);
+
+        return Ok(new { Message = "Eğer bu e-posta sistemde kayıtlıysa, parola sıfırlama linki gönderildi." });
+    }
+
+    public record ResetPasswordDto(string Token, string NewPassword);
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Token) || string.IsNullOrWhiteSpace(dto.NewPassword)) 
+            return BadRequest("Token ve yeni şifre zorunludur.");
+
+        var user = await _masterContext.Users.FirstOrDefaultAsync(u => u.PasswordResetToken == dto.Token);
+        if (user == null) return BadRequest("Geçersiz veya süresi dolmuş bağlantı.");
+
+        if (user.PasswordResetTokenExpiry < DateTime.UtcNow)
+        {
+            return BadRequest("Bağlantının süresi dolmuş. Lütfen yenisini talep ediniz.");
+        }
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        user.PasswordResetToken = null;
+        user.PasswordResetTokenExpiry = null;
+
+        await _masterContext.SaveChangesAsync();
+
+        return Ok(new { Message = "Şifreniz başarıyla değiştirildi. Şimdi giriş yapabilirsiniz." });
     }
 
     [HttpPost("login")]

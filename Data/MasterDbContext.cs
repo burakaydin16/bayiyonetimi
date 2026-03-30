@@ -31,6 +31,12 @@ public class MasterDbContext : DbContext
         modelBuilder.Entity<User>().Property(u => u.Role).HasColumnName("role");
         modelBuilder.Entity<User>().Property(u => u.Permissions).HasColumnName("permissions");
 
+        modelBuilder.Entity<User>().Property(u => u.IsEmailVerified).HasColumnName("is_email_verified");
+        modelBuilder.Entity<User>().Property(u => u.EmailVerificationToken).HasColumnName("email_verification_token");
+        modelBuilder.Entity<User>().Property(u => u.EmailVerificationTokenExpiry).HasColumnName("email_verification_token_expiry");
+        modelBuilder.Entity<User>().Property(u => u.PasswordResetToken).HasColumnName("password_reset_token");
+        modelBuilder.Entity<User>().Property(u => u.PasswordResetTokenExpiry).HasColumnName("password_reset_token_expiry");
+
         modelBuilder.Entity<SuperAdmin>().ToTable("super_admins", "public");
         modelBuilder.Entity<SuperAdmin>().Property(s => s.Id).HasColumnName("id");
         modelBuilder.Entity<SuperAdmin>().Property(s => s.Username).HasColumnName("username");
